@@ -1,0 +1,42 @@
+name: strip-claude-trailers
+
+# 一次性修复：剥离 feat/iter-026-focus-mode-decoupling 分支提交消息中的
+# "Co-Authored-By: Claude Opus 5" 签名，并把分支重置为与 main（CR-060 squash）
+# 一致的干净历史。合并携带本文件的 PR 时由 push 事件自动触发，无需手动运行；
+# force-push 会把本文件一并从分支上移除，因此只会执行一次。
+
+on:
+  push:
+    branches:
+      - feat/iter-026-focus-mode-decoupling
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  rewrite:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: feat/iter-026-focus-mode-decoupling
+
+      - name: Strip trailers and force-push clean history
+        run: |
+          set -euo pipefail
+          git config user.name  "KashiwagiEri233"
+          git config user.email "KashiwagiEri233@users.noreply.github.com"
+          # 污染历史止于 d18cd9558（含 3 个带 Claude 签名的提交，其后均为内容等价重写）
+          git branch tmp-clean d18cd9558e3dc9b5c2a861fc174c1ad6b27c47fd
+          FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --msg-filter \
+            'sed "/Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>/d"' \
+            -- 242cdce7..refs/heads/tmp-clean
+          REMAINING=$(git log 242cdce7..refs/heads/tmp-clean --grep="Claude" -i --format='%h' | wc -l | tr -d ' ')
+          if [ "$REMAINING" != "0" ]; then
+            echo "::error::仍有 ${REMAINING} 个提交包含 Claude 字样，中止推送"
+            exit 1
+          fi
+          git push --force origin refs/heads/tmp-clean:refs/heads/feat/iter-026-focus-mode-decoupling
+          echo "clean tip: $(git rev-parse refs/heads/tmp-clean)"
